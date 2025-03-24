@@ -1,4 +1,5 @@
 import numpy as np
+from abc import ABC, abstractmethod
 
 
 def softmax(predictions):
@@ -164,8 +165,63 @@ def linear_softmax(X, W, target_index):
     return loss, dW
 
 
-def ReLU(X):
-    return np.maximum(0, X)
+class NeuronLayer(ABC):
+    """Abstract base class for a neural network layer."""
+
+    @abstractmethod
+    def forward(self, inputs: np.ndarray) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def backward(self, d_output: np.ndarray, learning_rate: float) -> np.ndarray:
+        """Computes the backward pass.
+
+        Args:
+            d_output (np.ndarray): Gradient of the loss with respect to the output.
+            learning_rate (float): Learning rate for parameter updates.
+
+        Returns:
+            np.ndarray: Gradient of the loss with respect to the input.
+        """
+        pass
+
+
+class LinearLayer(NeuronLayer):
+    def __init__(self, input_size, output_size):
+        super().__init__()
+        self.__W = np.random.randn(input_size, output_size) * 0.001
+        self.__b = np.zeros((1, output_size))  # ???
+
+    def forward(self, inputs):
+        self.__input = inputs
+        self.__output = (inputs @ self.__W) + self.__b
+
+        return self.__output
+
+    def backward(self, d_output, learning_rate):
+        d_input = d_output @ self.__W.T
+        d_weights = self.__input.T @ d_output
+        d_biases = np.sum(d_output, axis=0, keepdims=True)
+
+        self.__W -= learning_rate * d_weights
+        self.__b -= learning_rate * d_biases
+
+        return d_input
+
+
+class ReLULayer(NeuronLayer):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, inputs):
+        self.__input = inputs
+        self.__output = np.maximum(0, inputs)
+
+        return self.__output
+
+    def backward(self, d_output, learning_rate):
+        d_input = d_output * (self.input > 0)
+        return d_input
 
 
 class LinearSoftmaxClassifier:
