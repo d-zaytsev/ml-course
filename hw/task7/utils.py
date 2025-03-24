@@ -139,40 +139,24 @@ def check_gradient(f, x, delta=1e-5, tol=1e-4):
     return True
 
 
-def linear_softmax(X, W, target_index):
-    """
-    Performs linear classification and returns loss and gradient over W
-
-    Arguments:
-      X, np array, shape (num_batch, num_features) - batch of images
-      W, np array, shape (num_features, classes) - weights
-      target_index, np array, shape (num_batch) - index of target classes
-
-    Returns:
-      loss, single value - cross-entropy loss
-      gradient, np.array same shape as W - gradient of weight by loss
-
-    """
-    predictions = np.dot(X, W)
-
-    loss, dl_dpred = softmax_with_cross_entropy(
-        predictions, target_index
-    )  # dpred (batch x classes)
-    dpred_dw = np.transpose(X)  # dw (features x batch)
-    dW = np.dot(dpred_dw, dl_dpred)
-
-    return loss, dW
-
-
 def ReLU(X):
     return np.maximum(0, X)
 
 
+def ReLU_backward(d_output, X):
+    dX = d_output.copy()
+    dX[X <= 0] = 0
+
+    return dX
+
+
 class LinearSoftmaxClassifier:
-    def __init__(self, num_hidden_neurons):
-        self.__num_hidden_neurons = num_hidden_neurons
-        self.__W1 = None
-        self.__W2 = None
+    def __init__(self, input_num, classes_num, hidden_neurons_num):
+        self.__W1 = 0.001 * np.random.randn(input_num, hidden_neurons_num)
+        self.__W2 = 0.001 * np.random.randn(hidden_neurons_num, classes_num)
+
+        self.__b1 = np.zeros(hidden_neurons_num)
+        self.__b2 = np.zeros(classes_num)
 
     def fit(self, X, y, batch_size=100, learning_rate=1e-7, reg=1e-5, epochs=1):
         """
@@ -188,19 +172,6 @@ class LinearSoftmaxClassifier:
         """
 
         num_train = X.shape[0]
-        num_input_neurons = X.shape[1]
-        num_output_neurons = np.max(y) + 1  # Classes
-
-        if self.__W1 is None:
-            assert self.__W2 is None
-            # input x hidden neurons number
-            self.__W1 = 0.001 * np.random.randn(
-                num_input_neurons, self.__num_hidden_neurons
-            )
-            # hidden neurons number x output
-            self.__W2 = 0.001 * np.random.randn(
-                self.__num_hidden_neurons, num_output_neurons
-            )
 
         for epoch in range(epochs):
             shuffled_indices = np.arange(num_train)
@@ -212,29 +183,37 @@ class LinearSoftmaxClassifier:
             for batch_idx in batches_indices:
                 batchX, batchY = X[batch_idx], y[batch_idx]
 
-                Z1 = batchX @ self.__W1
-                A1 = ReLU(Z1)
-                Z2 = A1 @ self.__W2
+                # Forward pass
+                Z1 = ReLU(batchX @ self.__W1 + self.__b1)
+                Z2 = Z1 @ self.__W2 + self.__b2
 
-                A2 = softmax(Z2)  # probabilities
-                loss = cross_entropy_loss(A2, batchY)
+                loss, dZ2 = softmax_with_cross_entropy(Z2, batchY)
 
-                # TODO backward pass
+                l2_loss1, l2_grad1 = l2_regularization(self.__W1, reg)
+                l2_loss2, l2_grad2 = l2_regularization(self.__W2, reg)
 
-                # loss, grad = linear_softmax(batchX, self.__W1, batchY)
+                loss += l2_loss1 + l2_loss2
+                print(f"Epoch {epoch}, loss: {loss}")
 
-                # l2_loss, l2_grad = l2_regularization(self.__W1, reg)
-                # loss += l2_loss
-                # grad += l2_grad
+                # Backward pass
 
-                # self.__W1 -= learning_rate * grad
+                dZ1 = dZ2 @ self.__W2.T
+                dZ1 = ReLU_backward(dZ1, Z1)
 
-            print("Epoch %i, loss: %f" % (epoch, loss))
+                dW2 = (Z1.T @ dZ2) + l2_grad2
+                dW1 = (batchX.T @ dZ1) + l2_grad1
+
+                db2 = np.sum(dZ2, axis=0)
+                db1 = np.sum(dZ1, axis=0)
+
+                # Gradient update
+                self.__W1 -= learning_rate * dW1
+                self.__W2 -= learning_rate * dW2
+                self.__b1 -= learning_rate * db1
+                self.__b2 -= learning_rate * db2
 
     def predict(self, X):
-        Z1 = X @ self.__W1
-        A1 = ReLU(Z1)
-        Z2 = A1 @ self.__W2
-        A2 = softmax(Z2)
+        Z1 = ReLU(X @ self.__W1 + self.__b1)
+        Z2 = Z1 @ self.__W2 + self.__b2
 
-        return A2
+        return softmax(Z2)
