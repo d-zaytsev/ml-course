@@ -151,7 +151,7 @@ def ReLU_backward(d_output, X):
     return dX
 
 
-class LinearSoftmaxClassifier:
+class MyClassifier:
     def __init__(self, input_num, classes_num, hidden_neurons_num):
         self.__W1 = 0.001 * np.random.randn(input_num, hidden_neurons_num)
         self.__W2 = 0.001 * np.random.randn(hidden_neurons_num, classes_num)
@@ -173,6 +173,7 @@ class LinearSoftmaxClassifier:
         """
 
         num_train = X.shape[0]
+        loss_list = []
 
         for epoch in range(epochs):
             shuffled_indices = np.arange(num_train)
@@ -194,7 +195,6 @@ class LinearSoftmaxClassifier:
                 l2_loss2, l2_grad2 = l2_regularization(self.__W2, reg)
 
                 loss += l2_loss1 + l2_loss2
-                print(f"Epoch {epoch}, loss: {loss}")
 
                 # Backward pass
 
@@ -213,8 +213,14 @@ class LinearSoftmaxClassifier:
                 self.__b1 -= learning_rate * db1
                 self.__b2 -= learning_rate * db2
 
+            loss_list.append(loss)
+        return loss_list
+
     def predict(self, X):
         Z1 = ReLU(X @ self.__W1 + self.__b1)
         Z2 = Z1 @ self.__W2 + self.__b2
 
         return softmax(Z2)
+
+    def predict_max(self, X):
+        return np.argmax(self.predict(X), axis=1).astype(int)
