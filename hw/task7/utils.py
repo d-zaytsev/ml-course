@@ -357,7 +357,7 @@ class MyBatchnormMomentumClassifier:
         self.__v_b1 = np.zeros_like(self.__b1)
         self.__v_b2 = np.zeros_like(self.__b2)
         self.__v_gamma = np.zeros_like(self.__gamma)
-        self.__v_betta = np.zeros_like(self.__beta)
+        self.__v_beta = np.zeros_like(self.__beta)
 
     def fit(self, X, y, batch_size=100, learning_rate=1e-7, reg=1e-5, epochs=1, mu=0.9):
         num_train = X.shape[0]
@@ -405,7 +405,7 @@ class MyBatchnormMomentumClassifier:
                 self.__v_b1 = mu * self.__v_b1 - learning_rate * db1
                 self.__v_b2 = mu * self.__v_b2 - learning_rate * db2
                 self.__v_gamma = mu * self.__v_gamma - learning_rate * dgamma
-                self.__v_betta = mu * self.__v_betta - learning_rate * dbeta
+                self.__v_beta = mu * self.__v_beta - learning_rate * dbeta
 
                 self.__W1 += self.__v_W1
                 self.__W2 += self.__v_W2
@@ -413,7 +413,126 @@ class MyBatchnormMomentumClassifier:
                 self.__b2 += self.__v_b2
 
                 self.__gamma += self.__v_gamma
-                self.__beta += self.__v_betta
+                self.__beta += self.__v_beta
+
+            loss_list.append(loss)
+        return loss_list
+
+    def predict(self, X):
+        H1 = X @ self.__W1 + self.__b1
+        H1_norm, _ = batchnorm_forward(H1, self.__gamma, self.__beta)
+
+        Z1 = ReLU(H1_norm)
+        Z2 = Z1 @ self.__W2 + self.__b2
+
+        return softmax(Z2)
+
+    def predict_max(self, X):
+        return np.argmax(self.predict(X), axis=1).astype(int)
+
+
+class MyBatchnormAdamClassifier:
+    def __init__(self, input_num, classes_num, hidden_neurons_num):
+        self.__W1 = 0.001 * np.random.randn(input_num, hidden_neurons_num)
+        self.__W2 = 0.001 * np.random.randn(hidden_neurons_num, classes_num)
+
+        self.__b1 = np.zeros(hidden_neurons_num)
+        self.__b2 = np.zeros(classes_num)
+
+        self.__gamma = np.ones(hidden_neurons_num)
+        self.__beta = np.zeros(hidden_neurons_num)
+
+        self.__v_W1 = np.zeros_like(self.__W1)
+        self.__v_W2 = np.zeros_like(self.__W2)
+        self.__v_b1 = np.zeros_like(self.__b1)
+        self.__v_b2 = np.zeros_like(self.__b2)
+        self.__v_gamma = np.zeros_like(self.__gamma)
+        self.__v_beta = np.zeros_like(self.__beta)
+
+        self.__m_W1 = np.zeros_like(self.__W1)
+        self.__m_W2 = np.zeros_like(self.__W2)
+        self.__m_b1 = np.zeros_like(self.__b1)
+        self.__m_b2 = np.zeros_like(self.__b2)
+        self.__m_gamma = np.zeros_like(self.__gamma)
+        self.__m_beta = np.zeros_like(self.__beta)
+
+    def fit(
+        self,
+        X,
+        y,
+        batch_size=100,
+        learning_rate=1e-7,
+        reg=1e-5,
+        epochs=1,
+        beta1=0.9,
+        beta2=0.999,
+        eps=1e-8,
+    ):
+        num_train = X.shape[0]
+        loss_list = []
+
+        for _ in range(epochs):
+            shuffled_indices = np.arange(num_train)
+            np.random.shuffle(shuffled_indices)
+
+            sections = np.arange(batch_size, num_train, batch_size)
+            batches_indices = np.array_split(shuffled_indices, sections)
+
+            for batch_idx in batches_indices:
+                batchX, batchY = X[batch_idx], y[batch_idx]
+
+                # Forward pass
+                H1 = batchX @ self.__W1 + self.__b1
+                H1_norm, bn_cache = batchnorm_forward(H1, self.__gamma, self.__beta)
+
+                Z1 = ReLU(H1_norm)
+                Z2 = Z1 @ self.__W2 + self.__b2
+
+                loss, dZ2 = softmax_with_cross_entropy(Z2, batchY)
+
+                l2_loss1, l2_grad1 = l2_regularization(self.__W1, reg)
+                l2_loss2, l2_grad2 = l2_regularization(self.__W2, reg)
+
+                loss += l2_loss1 + l2_loss2
+
+                # Backward pass
+
+                dZ1 = dZ2 @ self.__W2.T
+                dZ1 = ReLU_backward(dZ1, Z1)
+                dH1, dgamma, dbeta = batchnorm_backward(dZ1, bn_cache)
+
+                dW2 = (Z1.T @ dZ2) + l2_grad2
+                dW1 = (batchX.T @ dH1) + l2_grad1
+
+                db2 = np.sum(dZ2, axis=0)
+                db1 = np.sum(dH1, axis=0)
+
+                # Adam update
+                self.__m_W1 = beta1 * self.__m_W1 + (1 - beta1) * dW1
+                self.__m_W2 = beta1 * self.__m_W2 + (1 - beta1) * dW2
+                self.__m_b1 = beta1 * self.__m_b1 + (1 - beta1) * db1
+                self.__m_b2 = beta1 * self.__m_b2 + (1 - beta1) * db2
+                self.__m_gamma = beta1 * self.__m_gamma + (1 - beta1) * dgamma
+                self.__m_beta = beta1 * self.__m_beta + (1 - beta1) * dbeta
+
+                self.__v_W1 = beta2 * self.__v_W1 + (1 - beta2) * (dW1**2)
+                self.__v_W2 = beta2 * self.__v_W2 + (1 - beta2) * (dW2**2)
+                self.__v_b1 = beta2 * self.__v_b1 + (1 - beta2) * (db1**2)
+                self.__v_b2 = beta2 * self.__v_b2 + (1 - beta2) * (db2**2)
+                self.__v_gamma = beta2 * self.__v_gamma + (1 - beta2) * (dgamma**2)
+                self.__v_beta = beta2 * self.__v_beta + (1 - beta2) * (dbeta**2)
+
+                self.__W1 += -learning_rate * self.__m_W1 / (np.sqrt(self.__v_W1) + eps)
+                self.__W2 += -learning_rate * self.__m_W2 / (np.sqrt(self.__v_W2) + eps)
+                self.__b1 += -learning_rate * self.__m_b1 / (np.sqrt(self.__v_b1) + eps)
+                self.__b2 += -learning_rate * self.__m_b2 / (np.sqrt(self.__v_b2) + eps)
+
+                self.__gamma += (
+                    -learning_rate * self.__m_gamma / (np.sqrt(self.__v_gamma) + eps)
+                )
+                self.__beta += (
+                    -learning_rate * self.__m_beta / (np.sqrt(self.__v_beta) + eps)
+                )
 
             loss_list.append(loss)
         return loss_list
