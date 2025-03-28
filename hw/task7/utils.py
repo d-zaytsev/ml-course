@@ -1,5 +1,5 @@
 import numpy as np
-from abc import ABC, abstractmethod
+from dataclasses import astuple, dataclass
 
 
 def softmax(predictions):
@@ -149,6 +149,57 @@ def ReLU_backward(d_output, X):
     dX[X <= 0] = 0
 
     return dX
+
+
+@dataclass
+class BatchnormCache:
+    X: np.ndarray
+    mean: np.ndarray
+    var: np.ndarray
+    X_norm: np.ndarray
+    gamma: float
+    beta: float
+    epsilon: float
+
+    def __iter__(self):
+        return iter(astuple(self))
+
+
+def batchnorm_forward(X, gamma, beta, epsilon=1e-5):
+    mean = np.mean(X, axis=0)  # мат. ожидание батча (μ)
+    var = np.var(X, axis=0)  # дисперсия
+    X_norm = (X - mean) / np.sqrt(var + epsilon)  # нормализация
+    out = gamma * X_norm + beta  # сжатие и сдвиг
+
+    return out, BatchnormCache(X, mean, var, X_norm, gamma, beta, epsilon)
+
+
+def batchnorm_backward(dout, cache: BatchnormCache):
+    X, mean, var, X_norm, gamma, beta, epsilon = cache
+    m = X.shape[0]
+
+    # градиент по нормализованному входу
+    dX_norm = dout * gamma
+
+    # градиенты по параметрам
+    dgamma = np.sum(dout * X_norm, axis=0)
+    dbeta = np.sum(dout, axis=0)
+
+    # градиент по дисперсии
+    dvar = np.sum(
+        dX_norm * (X - mean) * (-1 / 2) * ((var + epsilon) ** (-3 / 2)), axis=0
+    )
+    # градиент по среднему
+    dmean = np.sum(dX_norm * (-1 / np.sqrt(var + epsilon)), axis=0) + dvar * np.mean(
+        -2 * (X - mean), axis=0
+    )
+
+    # градиент по входу X
+    dX = (
+        (dX_norm / np.sqrt(var + epsilon)) + ((dvar * 2 * (X - mean)) / m) + (dmean / m)
+    )
+
+    return dX, dgamma, dbeta
 
 
 class MyClassifier:
