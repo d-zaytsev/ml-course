@@ -339,3 +339,93 @@ class MyBatchnormClassifier:
 
     def predict_max(self, X):
         return np.argmax(self.predict(X), axis=1).astype(int)
+
+
+class MyBatchnormMomentumClassifier:
+    def __init__(self, input_num, classes_num, hidden_neurons_num):
+        self.__W1 = 0.001 * np.random.randn(input_num, hidden_neurons_num)
+        self.__W2 = 0.001 * np.random.randn(hidden_neurons_num, classes_num)
+
+        self.__b1 = np.zeros(hidden_neurons_num)
+        self.__b2 = np.zeros(classes_num)
+
+        self.__gamma = np.ones(hidden_neurons_num)
+        self.__beta = np.zeros(hidden_neurons_num)
+
+        self.__v_W1 = np.zeros_like(self.__W1)
+        self.__v_W2 = np.zeros_like(self.__W2)
+        self.__v_b1 = np.zeros_like(self.__b1)
+        self.__v_b2 = np.zeros_like(self.__b2)
+        self.__v_gamma = np.zeros_like(self.__gamma)
+        self.__v_betta = np.zeros_like(self.__beta)
+
+    def fit(self, X, y, batch_size=100, learning_rate=1e-7, reg=1e-5, epochs=1, mu=0.9):
+        num_train = X.shape[0]
+        loss_list = []
+
+        for _ in range(epochs):
+            shuffled_indices = np.arange(num_train)
+            np.random.shuffle(shuffled_indices)
+
+            sections = np.arange(batch_size, num_train, batch_size)
+            batches_indices = np.array_split(shuffled_indices, sections)
+
+            for batch_idx in batches_indices:
+                batchX, batchY = X[batch_idx], y[batch_idx]
+
+                # Forward pass
+                H1 = batchX @ self.__W1 + self.__b1
+                H1_norm, bn_cache = batchnorm_forward(H1, self.__gamma, self.__beta)
+
+                Z1 = ReLU(H1_norm)
+                Z2 = Z1 @ self.__W2 + self.__b2
+
+                loss, dZ2 = softmax_with_cross_entropy(Z2, batchY)
+
+                l2_loss1, l2_grad1 = l2_regularization(self.__W1, reg)
+                l2_loss2, l2_grad2 = l2_regularization(self.__W2, reg)
+
+                loss += l2_loss1 + l2_loss2
+
+                # Backward pass
+
+                dZ1 = dZ2 @ self.__W2.T
+                dZ1 = ReLU_backward(dZ1, Z1)
+                dH1, dgamma, dbeta = batchnorm_backward(dZ1, bn_cache)
+
+                dW2 = (Z1.T @ dZ2) + l2_grad2
+                dW1 = (batchX.T @ dH1) + l2_grad1
+
+                db2 = np.sum(dZ2, axis=0)
+                db1 = np.sum(dH1, axis=0)
+
+                # Momentum update
+                self.__v_W1 = mu * self.__v_W1 - learning_rate * dW1
+                self.__v_W2 = mu * self.__v_W2 - learning_rate * dW2
+                self.__v_b1 = mu * self.__v_b1 - learning_rate * db1
+                self.__v_b2 = mu * self.__v_b2 - learning_rate * db2
+                self.__v_gamma = mu * self.__v_gamma - learning_rate * dgamma
+                self.__v_betta = mu * self.__v_betta - learning_rate * dbeta
+
+                self.__W1 += self.__v_W1
+                self.__W2 += self.__v_W2
+                self.__b1 += self.__v_b1
+                self.__b2 += self.__v_b2
+
+                self.__gamma += self.__v_gamma
+                self.__beta += self.__v_betta
+
+            loss_list.append(loss)
+        return loss_list
+
+    def predict(self, X):
+        H1 = X @ self.__W1 + self.__b1
+        H1_norm, _ = batchnorm_forward(H1, self.__gamma, self.__beta)
+
+        Z1 = ReLU(H1_norm)
+        Z2 = Z1 @ self.__W2 + self.__b2
+
+        return softmax(Z2)
+
+    def predict_max(self, X):
+        return np.argmax(self.predict(X), axis=1).astype(int)
